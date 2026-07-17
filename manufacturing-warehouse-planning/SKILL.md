@@ -1,6 +1,6 @@
 ---
 name: manufacturing-warehouse-planning
-description: Generates a multi-SKU manufacturing warehouse planning Excel workbook (.xlsx) with inventory calculation formulas for raw material, WIP/process, and finished goods warehouses. Use when a user asks to calculate warehouse inventory requirements, warehouse area/size planning, or WIP/stock design calculations for a factory with multiple products, raw materials, and multi-step production processes.
+description: Generates a multi-SKU manufacturing warehouse planning Excel workbook with inventory calculation formulas for raw material, WIP/process, and finished goods warehouses. Use when a user asks about warehouse inventory sizing or area planning for a factory.
 ---
 
 # Manufacturing Warehouse Planning Template

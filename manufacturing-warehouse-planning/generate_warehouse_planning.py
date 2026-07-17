@@ -262,67 +262,14 @@ def build_params(wb):
         name="微软雅黑", color="FF0000", italic=True, size=9)
 
 
-# ===========================================================================
-# Sheet 3: 产品SKU
-# ===========================================================================
-# Parameter row references in 参数设置 sheet (1-indexed, row 1=title, row 2=header, data starts row 3)
-# Row 3: label "生产基础参数" section header
-# Row 4: 年工作天数       → C4
-# Row 5: 每天工作小时数   → C5
-# Row 6: 年工作小时数     → C6  (formula)
-# Row 7: 默认安全系数原料 → C7
-# Row 8: 默认安全系数过程 → C8
-# Row 9: 默认安全系数成品 → C9
-# Row 10: section header "托盘..."
-# Row 11: 托盘长           → C11
-# Row 12: 托盘宽           → C12  (actually 11,12 after section header)
-
-# Let me recount carefully. The params list:
-# index 0: section header "生产基础" → row 3
-# index 1: 年工作天数 → row 4
-# index 2: 每天工作小时数 → row 5
-# index 3: 年工作小时数 → row 6
-# index 4: 默认安全系数原料 → row 7
-# index 5: 默认安全系数过程 → row 8
-# index 6: 默认安全系数成品 → row 9
-# index 7: section header 托盘 → row 10
-# index 8: 托盘长 → row 11  (C10 in recalc formula references C10,C11)
-# Actually wait - in build_params above the formula is =参数设置!C10*参数设置!C11
-# That's because when we count rows: section header is row 10 (index7+3=10), 托盘长=row 11, 托盘宽=row12
-# But the formula =参数设置!C10*参数设置!C11 was written as the value for 单托盘占地面积
-# Let me re-examine: the formula string is already embedded in the params list:
-# index 8: 托盘长 → row 3+8=11 → C11
-# index 9: 托盘宽 → row 3+9=12 → C12  (note in original: C10,C11 which is wrong)
-# Actually wait - the row index. The params list has index 0..18, the row starts at 3:
-# row = 3+index. Let me trace:
-# params[0] section → row3
-# params[1] 年工作天数 → row4  C4
-# params[2] 每天小时 → row5  C5
-# params[3] 年工作小时 → row6, formula "=参数设置!C4*参数设置!C5" ✓
-# params[4] 安全系数原 → row7
-# params[5] 安全系数过 → row8
-# params[6] 安全系数成 → row9
-# params[7] section 托盘 → row10
-# params[8] 托盘长 → row11
-# params[9] 托盘宽 → row12  (but wait, in params list index9 is "标准托盘宽度")
-# Wait actually let me count again more carefully:
-# Actually in the params list I defined above, "单托盘占地面积" is at index 10:
-# params[0]=section, params[1]=年工作天数, params[2]=每天小时, params[3]=年小时,
-# params[4]=安全原料, params[5]=安全过程, params[6]=安全成品,
-# params[7]=section, params[8]=托盘长, params[9]=托盘宽, params[10]=单托盘占地,
-# So params[10] → row 3+10 = 13, and the formula is =参数设置!C10*参数设置!C11
-# But 托盘长 is params[8] → row 11 (C11), and 托盘宽 is params[9] → row 12 (C12)
-# The formula =参数设置!C10*参数设置!C11 should be =参数设置!C11*参数设置!C12
-# I need to fix this. Also the comment in the params list "C10*C11" appears wrong.
-# Let me fix these row references when writing the actual generate script.
-
-# I'll recalculate manually by tracing the loop.
-# OK let me just write the script properly without these cross-sheet formula confusions
-# by using named ranges or by carefully counting. I'll use explicit row numbers.
-
 NUM_SKU_ROWS = 12   # data rows for SKUs (supports up to 12 products)
 NUM_RM_ROWS  = 15   # data rows for raw materials
-NUM_PROC_ROWS = 10  # data rows per process position
+
+# 参数设置 row reference map (row 1=title, row 2=header, data starts row 3):
+#   C4=年工作天数, C5=每天工作小时数, C6=年工作小时数,
+#   C7=安全系数(原料), C8=安全系数(过程品), C9=安全系数(成品),
+#   C11=托盘长, C12=托盘宽, C13=单托盘占地面积, C14=地堆层数, C15=货架层数,
+#   C17=原料仓利用率, C18=过程品仓利用率, C19=成品仓利用率, C21=扩展余量系数
 
 def build_sku(wb):
     ws = wb.create_sheet("产品SKU")
@@ -574,7 +521,7 @@ def build_rawmat(wb):
         # User inputs
         set_inp(ws, r, 6, 15 if i < 8 else None, NUM_FMT_INT)   # lead time days
         set_inp(ws, r, 7, None, NUM_FMT_INT)                      # MOQ
-        set_inp(ws, r, 8, "=参数设置!$C$7", NUM_FMT_DEC2)         # safety factor
+        set_fml(ws, r, 8, "=参数设置!$C$7", NUM_FMT_DEC2)         # safety factor (references default from params)
         set_inp(ws, r, 9, None, NUM_FMT_INT)                       # safety stock qty
         set_inp(ws, r, 10, None, NUM_FMT_INT)                      # next batch prep
         set_inp(ws, r, 11, None, NUM_FMT_INT)                      # changeover return stock
@@ -776,7 +723,7 @@ def build_wip(wb):
     merge_hdr(ws, r, 1, 15, "过程品仓 合计", C_TITLE_BG)
     # Sum all P sub-totals (every 13th row from r=4: sub-total rows)
     set_fml(ws, r, 16, f"=SUMPRODUCT((MOD(ROW(P4:P{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*P4:P{r-1})", NUM_FMT_DEC2)
-    set_fml(ws, r, 17, f"=SUMPRODUCT((MOD(ROW(Q4:Q{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS}))*Q4:Q{r-1})", NUM_FMT_DEC2)
+    set_fml(ws, r, 17, f"=SUMPRODUCT((MOD(ROW(Q4:Q{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*Q4:Q{r-1})", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -992,12 +939,6 @@ def build_summary(wb):
     ws.row_dimensions[total_r].height = 26
     ws.merge_cells(f"A{total_r}:B{total_r}")
     merge_hdr(ws, total_r, 1, 2, "三类仓库合计（不含辅助区域）", C_HEADER_BG)
-    # Sum rows: raw(3), wip subtotals(4,5,6 or just wip total row 7), fg(8)
-    # Let's sum col G for all rows
-    set_fml(ws, total_r, 7,
-            f"=SUM(G3:G{total_r-1})-G{3+4}-G{3+5}-G{3+6}+G{3+4}",  # avoid double-count: sum all except WIP detail rows
-            NUM_FMT_DEC2)
-    # Actually simpler: sum raw + wip-total + fg only
     raw_r = 3
     wip_total_r = 3 + 4  # row index for "过程品仓 合计" (i=4 → r=3+4=7)
     fg_r = 3 + 5          # i=5 → r=3+5=8
