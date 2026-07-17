@@ -133,6 +133,7 @@ def build_readme(wb):
     t.fill  = PatternFill("solid", fgColor=C_HEADER_BG)
     t.alignment = Alignment(horizontal="center", vertical="center")
 
+    stage_chain = "→".join(MANUFACTURING_PROCESS_STAGES)
     sections = [
         ("【工作簿结构】", [
             ("使用说明",     "本页面，说明各工作表用途及填写方法。"),
@@ -158,7 +159,7 @@ def build_readme(wb):
         ]),
         ("【注意事项】", [
             ("多SKU换产",    "换产时会产生剩余退料（原料未用完退回），退料库存已在原料仓计算中单独考虑。"),
-            ("良率损耗",     "BOM 表中需填写累计良率损耗系数（如工序1×工序2×工序3的综合良率倒数），以反映从原料到成品的实际消耗。"),
+            ("良率损耗",     f"BOM 表中请填写单位成品实际原料消耗量（已包含{stage_chain}全流程良率损耗影响）。"),
             ("安全系数",     "参数设置中的安全系数会乘以基础库存量，建议原料仓1.1~1.3，过程品仓1.1~1.2，成品仓1.1~1.2。"),
             ("数量单位",     "本表不限定单位，请在各表表头的单位列中注明所使用的单位（件、箱、吨、kg等），并保持全表一致。"),
         ]),
@@ -264,6 +265,8 @@ def build_params(wb):
 
 NUM_SKU_ROWS = 12   # data rows for SKUs (supports up to 12 products)
 NUM_RM_ROWS  = 15   # data rows for raw materials
+MANUFACTURING_PROCESS_STAGES = ["粗破", "烘干", "磨粉", "低温碳化", "石墨化", "高温碳化", "成品筛分"]
+NUM_PROCESSES = len(MANUFACTURING_PROCESS_STAGES)
 
 # 参数设置 row reference map (row 1=title, row 2=header, data starts row 3):
 #   C4=年工作天数, C5=每天工作小时数, C6=年工作小时数,
@@ -276,7 +279,7 @@ def build_sku(wb):
     ws.sheet_view.showGridLines = False
 
     ws.row_dimensions[1].height = 34
-    ws.merge_cells("A1:R1")
+    ws.merge_cells("A1:V1")
     t = ws.cell(1, 1, "产品SKU — 产品级输入参数")
     t.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=13)
     t.fill = PatternFill("solid", fgColor=C_HEADER_BG)
@@ -297,11 +300,9 @@ def build_sku(wb):
         ("待检等待\n天数", 10),
         ("成品每托\n装载量(件)", 12),
         ("单件重量\n(kg)", 10),
-        ("过程品缓冲\n小时数\n(工序1后)", 12),
-        ("过程品缓冲\n小时数\n(工序2后)", 12),
-        ("过程品缓冲\n小时数\n(工序3后)", 12),
-        ("备注", 18),
     ]
+    headers.extend([(f"过程品缓冲\n小时数\n({stage}后)", 12) for stage in MANUFACTURING_PROCESS_STAGES])
+    headers.append(("备注", 18))
 
     col = 1
     for hdr, w in headers:
@@ -311,16 +312,17 @@ def build_sku(wb):
 
     ws.row_dimensions[2].height = 48
 
-    # Sample data rows (8 SKUs)
+    # Sample data rows（示例填充8个SKU，模板总计支持12个SKU）
+    # 每行最后7个数值依次对应 MANUFACTURING_PROCESS_STAGES 顺序的缓冲小时数
     sample_skus = [
-        ("SKU-001", "产品A", "件", 120000, "", "", 5000, 7,  14, 3, 2, 50,  0.5, 4, 6, 8),
-        ("SKU-002", "产品B", "件",  96000, "", "", 4000, 7,  14, 3, 2, 40,  0.6, 4, 6, 8),
-        ("SKU-003", "产品C", "件",  72000, "", "",  3000, 10, 15, 4, 2, 30,  0.8, 3, 5, 7),
-        ("SKU-004", "产品D", "件",  60000, "", "",  3000, 10, 15, 4, 2, 60,  0.4, 3, 5, 7),
-        ("SKU-005", "产品E", "件",  48000, "", "",  2000, 14, 20, 5, 3, 50,  0.5, 4, 6, 8),
-        ("SKU-006", "产品F", "件",  36000, "", "",  2000, 14, 20, 5, 3, 40,  0.7, 4, 6, 8),
-        ("SKU-007", "产品G", "件",  24000, "", "",  1500, 21, 21, 7, 3, 30,  1.0, 3, 5, 7),
-        ("SKU-008", "产品H", "件",  18000, "", "",  1500, 21, 21, 7, 3, 25,  1.2, 3, 5, 7),
+        ("SKU-001", "产品A", "件", 120000, "", "", 5000, 7, 14, 3, 2, 50, 0.5, 2, 3, 4, 5, 6, 7, 8),
+        ("SKU-002", "产品B", "件", 96000, "", "", 4000, 7, 14, 3, 2, 40, 0.6, 2, 3, 4, 4, 5, 6, 7),
+        ("SKU-003", "产品C", "件", 72000, "", "", 3000, 10, 15, 4, 2, 30, 0.8, 3, 4, 5, 5, 6, 7, 8),
+        ("SKU-004", "产品D", "件", 60000, "", "", 3000, 10, 15, 4, 2, 60, 0.4, 2, 2, 3, 4, 5, 6, 7),
+        ("SKU-005", "产品E", "件", 48000, "", "", 2000, 14, 20, 5, 3, 50, 0.5, 3, 4, 5, 6, 7, 8, 9),
+        ("SKU-006", "产品F", "件", 36000, "", "", 2000, 14, 20, 5, 3, 40, 0.7, 2, 3, 3, 4, 5, 6, 7),
+        ("SKU-007", "产品G", "件", 24000, "", "", 1500, 21, 21, 7, 3, 30, 1.0, 4, 5, 6, 7, 8, 9, 10),
+        ("SKU-008", "产品H", "件", 18000, "", "", 1500, 21, 21, 7, 3, 25, 1.2, 3, 4, 5, 6, 6, 7, 8),
     ]
 
     for i, sku in enumerate(sample_skus):
@@ -329,7 +331,7 @@ def build_sku(wb):
         fill = "F2F2F2" if i % 2 else "FFFFFF"
         ws.cell(r, 1, i + 1).font = bfont()
 
-        name_code, name, unit, annual, mo, dy, minbatch, interval, tgt_days, safe_days, insp_days, pallet_qty, wt, buf1, buf2, buf3 = sku
+        name_code, name, unit, annual, mo, dy, minbatch, interval, tgt_days, safe_days, insp_days, pallet_qty, wt, *buffers = sku
 
         set_inp(ws, r, 2, name_code)
         set_inp(ws, r, 3, name)
@@ -346,17 +348,16 @@ def build_sku(wb):
         set_inp(ws, r, 12, insp_days, NUM_FMT_INT)
         set_inp(ws, r, 13, pallet_qty, NUM_FMT_INT)
         set_inp(ws, r, 14, wt, NUM_FMT_DEC2)
-        set_inp(ws, r, 15, buf1, NUM_FMT_DEC2)
-        set_inp(ws, r, 16, buf2, NUM_FMT_DEC2)
-        set_inp(ws, r, 17, buf3, NUM_FMT_DEC2)
-        set_inp(ws, r, 18, "")
+        for offset, val in enumerate(buffers, start=15):
+            set_inp(ws, r, offset, val, NUM_FMT_DEC2)
+        set_inp(ws, r, 15 + NUM_PROCESSES, "")
 
     # Blank rows for extension
     for i in range(len(sample_skus), NUM_SKU_ROWS):
         r = 3 + i
         ws.row_dimensions[r].height = 20
         ws.cell(r, 1, i + 1)
-        for col in range(2, 19):
+        for col in range(2, 16 + NUM_PROCESSES):
             set_inp(ws, r, col)
         # daily formula
         set_fml(ws, r, 6, f"=IFERROR(产品SKU!E{r}/12,\"\")", NUM_FMT_DEC2)
@@ -611,11 +612,13 @@ def build_wip(wb):
         col += 1
     ws.row_dimensions[3].height = 54
 
-    # 3 process positions × up to NUM_SKU_ROWS SKUs
-    processes = ["工序1后暂存", "工序2后暂存", "工序3后暂存（成品前）"]
-    # Buffer hour column in 产品SKU: O=col15, P=col16, Q=col17
-
-    buf_cols = [15, 16, 17]  # column index in 产品SKU for process 1,2,3 buffer hours
+    # N process positions × up to NUM_SKU_ROWS SKUs
+    processes = [
+        f"{stage}后暂存（成品前）" if idx == NUM_PROCESSES - 1 else f"{stage}后暂存"
+        for idx, stage in enumerate(MANUFACTURING_PROCESS_STAGES)
+    ]
+    # Buffer hour columns in 产品SKU start from col15
+    buf_cols = list(range(15, 15 + NUM_PROCESSES))
 
     r = 4
     for proc_idx, (proc_name, buf_sku_col) in enumerate(zip(processes, buf_cols)):
@@ -700,7 +703,7 @@ def build_wip(wb):
     ws.row_dimensions[r].height = 22
     ws.merge_cells(f"A{r}:O{r}")
     merge_hdr(ws, r, 1, 15, "过程品仓 合计", C_TITLE_BG)
-    # SUMPRODUCT selects rows where MOD(row_offset, block_size) == subtotal_position within block
+    # SUMPRODUCT + MOD 仅选择每个工序分块中的“小计行”（每块长度 NUM_SKU_ROWS+2，小计位于偏移 NUM_SKU_ROWS+1）
     set_fml(ws, r, 16, f"=SUMPRODUCT((MOD(ROW(P4:P{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*P4:P{r-1})", NUM_FMT_DEC2)
     set_fml(ws, r, 17, f"=SUMPRODUCT((MOD(ROW(Q4:Q{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*Q4:Q{r-1})", NUM_FMT_DEC2)
 
@@ -840,51 +843,50 @@ def build_summary(wb):
     # Raw material warehouse total row reference
     rm_total_row = 4 + NUM_RM_ROWS
     # WIP grand total row calculation
-    # 3 processes, each uses (1 section header + NUM_SKU_ROWS data rows + 1 subtotal) = NUM_SKU_ROWS+2
-    # grand total is at row = 4 + 3*(NUM_SKU_ROWS+2)
-    wip_grand_row = 4 + 3 * (NUM_SKU_ROWS + 2)
+    # each process uses (1 section header + NUM_SKU_ROWS data rows + 1 subtotal) = NUM_SKU_ROWS+2
+    # grand total is at row = 4 + NUM_PROCESSES*(NUM_SKU_ROWS+2)
+    wip_grand_row = 4 + NUM_PROCESSES * (NUM_SKU_ROWS + 2)
     fg_total_row  = 4 + NUM_SKU_ROWS
 
     rows = [
         ("原料仓",     "MAX(日消耗×采购提前期, MOQ)×安全系数 + 安全库存 + 下批备料 + 退料 + 待检",
          f"=原料仓计算!M{rm_total_row}", "（各原料单位不同）",
          f"=原料仓计算!O{rm_total_row}", f"=原料仓计算!P{rm_total_row}"),
-        ("过程品仓\n（工序1后）",  "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-         None, "件",
-         None, None),
-        ("过程品仓\n（工序2后）",  "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-         None, "件",
-         None, None),
-        ("过程品仓\n（工序3后）",  "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-         None, "件",
-         None, None),
+    ]
+    for stage in MANUFACTURING_PROCESS_STAGES:
+        rows.append((
+            f"过程品仓\n（{stage}后）",
+            "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
+            None,
+            "件",
+            None,
+            None,
+        ))
+    rows.extend([
         ("过程品仓 合计", f"见过程品仓计算!P{wip_grand_row}",
          f"=过程品仓计算!P{wip_grand_row}", "件",
          None, f"=过程品仓计算!Q{wip_grand_row}"),
         ("成品仓",     "MAX(日需求×生产间隔, 日需求×目标天数, 最小批量) + 安全库存 + 待检放行",
          f"=成品仓计算!N{fg_total_row}", "件",
          None, f"=成品仓计算!O{fg_total_row}"),
-    ]
+    ])
 
     # Find WIP per-process subtotal rows
     proc_subtotal_rows = []
-    for proc_idx in range(3):
+    for proc_idx in range(NUM_PROCESSES):
         # section header at: 4 + proc_idx*(NUM_SKU_ROWS+2), data rows follow, subtotal at +NUM_SKU_ROWS+1
         subtotal_r = 4 + proc_idx * (NUM_SKU_ROWS + 2) + NUM_SKU_ROWS + 1
         proc_subtotal_rows.append(subtotal_r)
 
-    rows[1] = ("过程品仓\n（工序1后）",
-               "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-               f"=过程品仓计算!P{proc_subtotal_rows[0]}", "件",
-               None, f"=过程品仓计算!Q{proc_subtotal_rows[0]}")
-    rows[2] = ("过程品仓\n（工序2后）",
-               "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-               f"=过程品仓计算!P{proc_subtotal_rows[1]}", "件",
-               None, f"=过程品仓计算!Q{proc_subtotal_rows[1]}")
-    rows[3] = ("过程品仓\n（工序3后）",
-               "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-               f"=过程品仓计算!P{proc_subtotal_rows[2]}", "件",
-               None, f"=过程品仓计算!Q{proc_subtotal_rows[2]}")
+    for proc_idx, stage in enumerate(MANUFACTURING_PROCESS_STAGES):
+        rows[1 + proc_idx] = (
+            f"过程品仓\n（{stage}后）",
+            "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
+            f"=过程品仓计算!P{proc_subtotal_rows[proc_idx]}",
+            "件",
+            None,
+            f"=过程品仓计算!Q{proc_subtotal_rows[proc_idx]}",
+        )
 
     for i, (wh, basis, qty_fml, unit, pallet_fml, area_fml) in enumerate(rows):
         r = 3 + i
@@ -919,8 +921,8 @@ def build_summary(wb):
     ws.merge_cells(f"A{total_r}:B{total_r}")
     merge_hdr(ws, total_r, 1, 2, "三类仓库合计（不含辅助区域）", C_HEADER_BG)
     raw_r = 3
-    wip_total_r = 3 + 4  # row index for "过程品仓 合计" (i=4 → r=3+4=7)
-    fg_r = 3 + 5          # i=5 → r=3+5=8
+    wip_total_r = 3 + 1 + NUM_PROCESSES  # row index for "过程品仓 合计"
+    fg_r = wip_total_r + 1
     set_fml(ws, total_r, 7,
             f"=IFERROR(汇总!G{raw_r}+汇总!G{wip_total_r}+汇总!G{fg_r},0)",
             NUM_FMT_DEC2)
@@ -998,10 +1000,15 @@ def main():
         if sheet_name in wb.sheetnames:
             wb[sheet_name].sheet_properties.tabColor = color
 
-    out_path = os.path.join(os.path.dirname(__file__), "仓库规划库存需求计算模板.xlsx")
+    out_dir = os.path.dirname(__file__)
+    out_path = os.path.join(out_dir, "仓库规划库存需求计算模板.xlsx")
+    out_path_7stage = os.path.join(out_dir, "仓库规划库存需求计算模板_七道工序版.xlsx")
     wb.save(out_path)
+    # 按业务要求额外提供同内容副本，便于按“七道工序版”文件名直接分发使用
+    wb.save(out_path_7stage)
     print(f"✅ 已生成: {out_path}")
-    return out_path
+    print(f"✅ 已生成: {out_path_7stage}")
+    return out_path_7stage
 
 
 if __name__ == "__main__":

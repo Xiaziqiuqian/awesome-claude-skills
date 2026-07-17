@@ -5,11 +5,11 @@ description: Generates a multi-SKU manufacturing warehouse planning Excel workbo
 
 # Manufacturing Warehouse Planning Template
 
-This skill generates a complete Excel workbook (`仓库规划库存需求计算模板.xlsx`) for calculating inventory design quantities and estimated floor areas across three warehouse types in a factory.
+This skill generates an Excel workbook for calculating inventory design quantities and estimated floor areas across three warehouse types in a factory. It generates two identical files with different filenames: a standard version and a "七道工序版" version (`仓库规划库存需求计算模板.xlsx` and `仓库规划库存需求计算模板_七道工序版.xlsx`) for business distribution.
 
 ## Factory Flow Supported
 
-> Raw materials → Process 1 → Process 2 → Process 3 → Finished Goods
+> 原料 → 粗破 → 烘干 → 磨粉 → 低温碳化 → 石墨化 → 高温碳化 → 成品筛分 → 成品
 
 ## Workbook Structure (8 sheets)
 
@@ -63,7 +63,7 @@ cd manufacturing-warehouse-planning
 python generate_warehouse_planning.py
 ```
 
-This produces `仓库规划库存需求计算模板.xlsx` in the same directory.
+This produces `仓库规划库存需求计算模板.xlsx` and an extra same-content copy `仓库规划库存需求计算模板_七道工序版.xlsx` in the same directory.
 
 ## Input Conventions
 
