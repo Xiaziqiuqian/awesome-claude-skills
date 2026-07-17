@@ -544,29 +544,8 @@ def build_rawmat(wb):
                       f"IF(原料仓计算!N{r}=0,1,原料仓计算!N{r}),1),0)")
         set_fml(ws, r, 15, pallet_fml, NUM_FMT_INT)
 
-        # Estimated area (m²)
-        # = pallet_count × pallet_area / stack_layers / utilization_rate × expansion_factor
-        # 参数设置 rows: 单托盘占地=C12 (row13), 地堆层数=C13(row14), 原料仓利用率=C16(row17), 扩展=C20(row21)
-        # Let me trace: params list row3..row21:
-        # r3: section 生产基础
-        # r4:  年工作天数
-        # r5:  每天小时
-        # r6:  年小时
-        # r7:  安全原料
-        # r8:  安全过程
-        # r9:  安全成品
-        # r10: section 托盘
-        # r11: 托盘长
-        # r12: 托盘宽
-        # r13: 单托盘占地
-        # r14: 地堆层数
-        # r15: 货架层数
-        # r16: section 面积利用率
-        # r17: 原料仓利用率
-        # r18: 过程品仓利用率
-        # r19: 成品仓利用率
-        # r20: section 扩展余量
-        # r21: 面积扩展余量系数
+        # Estimated area (m²) = pallet_count × pallet_area / stack_layers / utilization × expansion
+        # Parameter refs: C13=单托盘占地, C14=地堆层数, C17=原料仓利用率, C21=扩展系数
         area_fml = (f"=IFERROR(原料仓计算!O{r}*参数设置!$C$13"
                     f"/MAX(参数设置!$C$14,1)"
                     f"/参数设置!$C$17"
@@ -717,11 +696,11 @@ def build_wip(wb):
         set_fml(ws, r, 17, f"=SUM(Q{sub_start}:Q{r-1})", NUM_FMT_DEC2)
         r += 1
 
-    # Grand total
+    # Grand total: sum only the subtotal rows (every NUM_SKU_ROWS+2 rows, at offset NUM_SKU_ROWS+1)
     ws.row_dimensions[r].height = 22
     ws.merge_cells(f"A{r}:O{r}")
     merge_hdr(ws, r, 1, 15, "过程品仓 合计", C_TITLE_BG)
-    # Sum all P sub-totals (every 13th row from r=4: sub-total rows)
+    # SUMPRODUCT selects rows where MOD(row_offset, block_size) == subtotal_position within block
     set_fml(ws, r, 16, f"=SUMPRODUCT((MOD(ROW(P4:P{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*P4:P{r-1})", NUM_FMT_DEC2)
     set_fml(ws, r, 17, f"=SUMPRODUCT((MOD(ROW(Q4:Q{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*Q4:Q{r-1})", NUM_FMT_DEC2)
 
