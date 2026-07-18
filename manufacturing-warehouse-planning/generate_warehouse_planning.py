@@ -140,9 +140,9 @@ def build_readme(wb):
             ("参数设置",     "填写全局通用参数：年工作天数、安全系数、托盘尺寸、面积利用率等。"),
             ("产品SKU",      "逐行输入每个产品/SKU 的需求与生产参数（年需求量、最小批量、生产间隔、成品目标库存天数等）。"),
             ("原料BOM",      "填写产品-原料消耗矩阵，每行一种原料，列对应各SKU，输入单位消耗量及累计良率损耗系数。"),
-            ("原料仓计算",   "自动按原料汇总日消耗量，并计算：\n设计库存 = MAX(日消耗×采购提前期, 最小订购量) + 安全库存 + 下批备料库存 + 退料库存 + 待检库存。"),
-            ("过程品仓计算", "按工序位置和SKU 计算：\n设计WIP = MAX(下游小时消耗×缓冲小时数, 批量×最大等待批次数) + 待检库存 + 尾批库存 + 不良/返工库存。"),
-            ("成品仓计算",   "按SKU 计算：\n设计库存 = MAX(日需求×生产间隔, 日需求×目标库存天数, 最小生产批量) + 安全库存 + 待检放行库存。"),
+            ("原料仓计算",   "自动按原料汇总日消耗量，并计算：\n设计库存 = MAX(日消耗×有效采购提前期, MOQ, MPQ)×安全系数 + 安全库存 + 下批备料库存 + 退料库存 + 待检库存 - 旧料可消耗量。"),
+            ("过程品仓计算", "按工序位置和SKU 计算：\n设计WIP = 修正后基础WIP + 待检库存 + 尾批库存 + 不良/返工库存；其中修正后基础WIP考虑设备故障率与工序良率损失。"),
+            ("成品仓计算",   "按SKU 计算：\n设计库存 = MAX(日需求×生产间隔, 日需求×目标库存天数, 最小生产批量) + 安全库存 + 返工补偿库存 + 待检放行库存。"),
             ("汇总",         "汇总三类仓库的设计库存量，并可选择计算托盘数和估算面积。"),
         ]),
         ("【填写说明】", [
@@ -152,14 +152,16 @@ def build_readme(wb):
             ("行数扩展",     "各计算表预留了足够行数（最多20行），需要更多行时可复制最后一行的公式向下填充。"),
         ]),
         ("【计算逻辑说明】", [
-            ("原料仓",       "库存 = MAX(日均消耗×采购提前期天数, 最小订购量MOQ) + 安全库存 + 下一批次备料库存 + 换产退料库存 + 待检库存"),
-            ("过程品仓",     "库存 = MAX(下游小时消耗×缓冲小时数, 批量大小×最大等待批次数) + 待检等待库存 + 尾批库存 + 不良品/返工/隔离库存"),
-            ("成品仓",       "库存 = MAX(日需求量×生产间隔天数, 日需求量×目标库存天数, 最小生产批量) + 安全库存天数×日需求量 + 待检放行库存"),
+            ("原料仓",       "库存 = MAX(日均消耗×有效采购提前期天数, MOQ, MPQ)×安全系数 + 安全库存 + 下一批次备料 + 换产退料 + 待检库存 - 旧料可消耗量"),
+            ("过程品仓",     "库存 = MAX(下游小时消耗×缓冲小时数, 批量大小×最大等待批次数) ÷(1-故障率)×(1+良率损失率) + 待检等待库存 + 尾批库存 + 不良品/返工/隔离库存"),
+            ("成品仓",       "库存 = MAX(日需求量×生产间隔天数, 日需求量×目标库存天数, 最小生产批量) + 安全库存天数×日需求量 + 返工补偿库存 + 待检放行库存"),
             ("面积估算",     "仓库面积 = 库存量 ÷ 每托盘装载量 × 单托盘占地面积 ÷ 堆码层数 ÷ 面积利用率"),
         ]),
         ("【注意事项】", [
             ("多SKU换产",    "换产时会产生剩余退料（原料未用完退回），退料库存已在原料仓计算中单独考虑。"),
             ("良率损耗",     f"BOM 表中请填写单位成品实际原料消耗量（已包含{stage_chain}全流程良率损耗影响）。"),
+            ("动态安全库存", "当前模板暂按固定安全库存计算（未启用动态算法）；后续有数据后可在参数设置中启用。"),
+            ("分层管理",     "当前模板未启用ABC/XYZ分层管理，建议后续有分层规则后再接入差异化安全库存。"),
             ("安全系数",     "参数设置中的安全系数会乘以基础库存量，建议原料仓1.1~1.3，过程品仓1.1~1.2，成品仓1.1~1.2。"),
             ("数量单位",     "本表不限定单位，请在各表表头的单位列中注明所使用的单位（件、箱、吨、kg等），并保持全表一致。"),
         ]),
@@ -232,6 +234,18 @@ def build_params(wb):
 
         ("【扩展余量】", None, None, None),
         ("面积扩展余量系数",   1.2,   "—",      "最终面积乘以该系数，预留10%~30%余量"),
+
+        ("【需求与供应波动修正】", None, None, None),
+        ("Q3/Q4需求峰值系数",      1.2,   "—",      "旺季需求放大系数，建议1.10~1.30"),
+        ("订单变更/取消冗余系数",  1.03,  "—",      "可参考历史呆滞库存占比估算，建议1.00~1.10"),
+        ("原料交期波动系数",       1.1,   "—",      "用于放大基础采购提前期，覆盖供应商波动"),
+        ("春节停运附加天数",       18,    "天",     "节假日停运可按15~21天预估"),
+        ("瓶颈设备故障率",         0.08,  "—",      "按瓶颈工序设备故障率估算产能波动"),
+        ("石墨化良率损失率",       0.08,  "—",      "石墨化工序低良率补偿参数，建议5%~15%"),
+        ("成品返工率",             0.08,  "—",      "成品工序返工比例参数，建议5%~10%"),
+        ("新品爬坡系数",           1.05,  "—",      "新品爬坡阶段需求修正系数"),
+        ("动态安全库存启用标记",   0,     "0/1",    "当前默认0=未启用，后续有数据后可切换"),
+        ("ABC分层管理启用标记",    0,     "0/1",    "当前默认0=未启用，后续分层管理后可切换"),
     ]
 
     row = 3
@@ -272,7 +286,10 @@ NUM_PROCESSES = len(MANUFACTURING_PROCESS_STAGES)
 #   C4=年工作天数, C5=每天工作小时数, C6=年工作小时数,
 #   C7=安全系数(原料), C8=安全系数(过程品), C9=安全系数(成品),
 #   C11=托盘长, C12=托盘宽, C13=单托盘占地面积, C14=地堆层数, C15=货架层数,
-#   C17=原料仓利用率, C18=过程品仓利用率, C19=成品仓利用率, C21=扩展余量系数
+#   C17=原料仓利用率, C18=过程品仓利用率, C19=成品仓利用率, C21=扩展余量系数,
+#   C24=Q3/Q4需求峰值系数, C25=订单变更/取消冗余系数, C26=原料交期波动系数,
+#   C27=春节停运附加天数, C28=瓶颈设备故障率, C29=石墨化良率损失率,
+#   C30=成品返工率, C31=新品爬坡系数
 
 def build_sku(wb):
     ws = wb.create_sheet("产品SKU")
@@ -340,7 +357,7 @@ def build_sku(wb):
         # monthly = annual / 12
         set_fml(ws, r, 6, f"=IFERROR(产品SKU!E{r}/12,\"\")", NUM_FMT_DEC2)
         # daily = annual / working days
-        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4,\"\")", NUM_FMT_DEC2)
+        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
         set_inp(ws, r, 8, minbatch, NUM_FMT_INT)
         set_inp(ws, r, 9, interval, NUM_FMT_INT)
         set_inp(ws, r, 10, tgt_days, NUM_FMT_INT)
@@ -361,7 +378,7 @@ def build_sku(wb):
             set_inp(ws, r, col)
         # daily formula
         set_fml(ws, r, 6, f"=IFERROR(产品SKU!E{r}/12,\"\")", NUM_FMT_DEC2)
-        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4,\"\")", NUM_FMT_DEC2)
+        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -449,15 +466,15 @@ def build_rawmat(wb):
     ws.sheet_view.showGridLines = False
 
     ws.row_dimensions[1].height = 34
-    ws.merge_cells("A1:P1")
+    ws.merge_cells("A1:U1")
     t = ws.cell(1, 1, "原料仓计算 — 设计库存量")
     t.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=13)
     t.fill = PatternFill("solid", fgColor=C_HEADER_BG)
     t.alignment = Alignment(horizontal="center", vertical="center")
 
-    note_text = ("公式：设计库存 = MAX(日均消耗×采购提前期, MOQ) × 安全系数 + 安全库存 + "
-                 "下批备料库存 + 换产退料库存 + 待检库存")
-    ws.merge_cells("A2:P2")
+    note_text = ("公式：设计库存 = MAX(日均消耗×有效采购提前期, MOQ, MPQ) × 安全系数 + 安全库存 + "
+                 "下批备料库存 + 换产退料库存 + 待检库存 - 呆滞旧料可消耗量")
+    ws.merge_cells("A2:U2")
     note = ws.cell(2, 1, note_text)
     note.font = Font(name="微软雅黑", italic=True, color="444444", size=9)
     note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -469,13 +486,18 @@ def build_rawmat(wb):
         ("原料名称",        18),
         ("单位",            6),
         ("日均总消耗量\n[自动]", 14),
-        ("采购提前期\n(天)", 12),
+        ("基础采购\n提前期(天)", 12),
+        ("春节停运\n附加天数", 12),
+        ("交期波动\n系数", 10),
+        ("有效采购\n提前期(天)\n[自动]", 14),
         ("最小订购量\nMOQ",  12),
+        ("最小到货批量\nMPQ", 12),
         ("安全系数",        10),
         ("安全库存量\n(件)", 12),
         ("下批备料\n库存量", 12),
         ("换产退料\n库存量", 12),
         ("待检库存量",       12),
+        ("呆滞旧料\n可消耗量", 12),
         ("设计库存量\n[自动]", 14),
         ("每托盘装量",       10),
         ("设计托盘数\n[自动]", 12),
@@ -520,47 +542,55 @@ def build_rawmat(wb):
         set_fml(ws, r, 5, daily_fml, NUM_FMT_DEC2)
 
         # User inputs
-        set_inp(ws, r, 6, 15 if i < 8 else None, NUM_FMT_INT)   # lead time days
-        set_inp(ws, r, 7, None, NUM_FMT_INT)                      # MOQ
-        set_fml(ws, r, 8, "=参数设置!$C$7", NUM_FMT_DEC2)         # safety factor (references default from params)
-        set_inp(ws, r, 9, None, NUM_FMT_INT)                       # safety stock qty
-        set_inp(ws, r, 10, None, NUM_FMT_INT)                      # next batch prep
-        set_inp(ws, r, 11, None, NUM_FMT_INT)                      # changeover return stock
-        set_inp(ws, r, 12, None, NUM_FMT_INT)                      # inspection pending
+        set_inp(ws, r, 6, 15 if i < 8 else None, NUM_FMT_INT)     # base lead time
+        set_fml(ws, r, 7, "=参数设置!$C$27", NUM_FMT_INT)          # spring festival holiday days
+        set_fml(ws, r, 8, "=参数设置!$C$26", NUM_FMT_DEC2)         # lead-time variation factor
+        set_fml(ws, r, 9, f"=IFERROR((原料仓计算!F{r}+原料仓计算!G{r})*原料仓计算!H{r},0)", NUM_FMT_DEC2)
+        set_inp(ws, r, 10, None, NUM_FMT_INT)                     # MOQ
+        set_inp(ws, r, 11, None, NUM_FMT_INT)                     # MPQ
+        set_fml(ws, r, 12, "=参数设置!$C$7", NUM_FMT_DEC2)        # safety factor
+        set_inp(ws, r, 13, None, NUM_FMT_INT)                     # safety stock qty
+        set_inp(ws, r, 14, None, NUM_FMT_INT)                     # next batch prep
+        set_inp(ws, r, 15, None, NUM_FMT_INT)                     # changeover return stock
+        set_inp(ws, r, 16, None, NUM_FMT_INT)                     # inspection pending
+        set_inp(ws, r, 17, None, NUM_FMT_INT)                     # obsolete stock consumption offset
 
-        # Design stock = MAX(daily×lead, MOQ) × safety_factor + safety_stock + next_batch + return + inspection
-        design_fml = (f"=IFERROR(MAX(原料仓计算!E{r}*原料仓计算!F{r},"
-                      f"IF(原料仓计算!G{r}=\"\",0,原料仓计算!G{r}))"
-                      f"*原料仓计算!H{r}"
-                      f"+IF(原料仓计算!I{r}=\"\",0,原料仓计算!I{r})"
-                      f"+IF(原料仓计算!J{r}=\"\",0,原料仓计算!J{r})"
-                      f"+IF(原料仓计算!K{r}=\"\",0,原料仓计算!K{r})"
-                      f"+IF(原料仓计算!L{r}=\"\",0,原料仓计算!L{r}),0)")
-        set_fml(ws, r, 13, design_fml, NUM_FMT_DEC2)
+        # Design stock = MAX(daily×effective lead, MOQ, MPQ) × safety_factor + safety + next + return + inspection - obsolete use
+        design_fml = (f"=IFERROR(MAX(0,"
+                      f"MAX(原料仓计算!E{r}*原料仓计算!I{r},"
+                      f"IF(原料仓计算!J{r}=\"\",0,原料仓计算!J{r}),"
+                      f"IF(原料仓计算!K{r}=\"\",0,原料仓计算!K{r}))"
+                      f"*原料仓计算!L{r}"
+                      f"+IF(原料仓计算!M{r}=\"\",0,原料仓计算!M{r})"
+                      f"+IF(原料仓计算!N{r}=\"\",0,原料仓计算!N{r})"
+                      f"+IF(原料仓计算!O{r}=\"\",0,原料仓计算!O{r})"
+                      f"+IF(原料仓计算!P{r}=\"\",0,原料仓计算!P{r})"
+                      f"-IF(原料仓计算!Q{r}=\"\",0,原料仓计算!Q{r})),0)")
+        set_fml(ws, r, 18, design_fml, NUM_FMT_DEC2)
 
-        set_inp(ws, r, 14, None, NUM_FMT_INT)  # pallet capacity
+        set_inp(ws, r, 19, None, NUM_FMT_INT)  # pallet capacity
 
         # Pallet count
-        pallet_fml = (f"=IFERROR(CEILING(原料仓计算!M{r}/"
-                      f"IF(原料仓计算!N{r}=0,1,原料仓计算!N{r}),1),0)")
-        set_fml(ws, r, 15, pallet_fml, NUM_FMT_INT)
+        pallet_fml = (f"=IFERROR(CEILING(原料仓计算!R{r}/"
+                      f"IF(原料仓计算!S{r}=0,1,原料仓计算!S{r}),1),0)")
+        set_fml(ws, r, 20, pallet_fml, NUM_FMT_INT)
 
         # Estimated area (m²) = pallet_count × pallet_area / stack_layers / utilization × expansion
         # Parameter refs: C13=单托盘占地, C14=地堆层数, C17=原料仓利用率, C21=扩展系数
-        area_fml = (f"=IFERROR(原料仓计算!O{r}*参数设置!$C$13"
+        area_fml = (f"=IFERROR(原料仓计算!T{r}*参数设置!$C$13"
                     f"/MAX(参数设置!$C$14,1)"
                     f"/参数设置!$C$17"
                     f"*参数设置!$C$21,0)")
-        set_fml(ws, r, 16, area_fml, NUM_FMT_DEC2)
+        set_fml(ws, r, 21, area_fml, NUM_FMT_DEC2)
 
     # Total row
     total_r = 4 + NUM_RM_ROWS
     ws.row_dimensions[total_r].height = 22
     ws.merge_cells(f"A{total_r}:D{total_r}")
     merge_hdr(ws, total_r, 1, 4, "合计", C_TITLE_BG)
-    set_fml(ws, total_r, 13, f"=SUM(M4:M{total_r-1})", NUM_FMT_DEC2)
-    set_fml(ws, total_r, 15, f"=SUM(O4:O{total_r-1})", NUM_FMT_INT)
-    set_fml(ws, total_r, 16, f"=SUM(P4:P{total_r-1})", NUM_FMT_DEC2)
+    set_fml(ws, total_r, 18, f"=SUM(R4:R{total_r-1})", NUM_FMT_DEC2)
+    set_fml(ws, total_r, 20, f"=SUM(T4:T{total_r-1})", NUM_FMT_INT)
+    set_fml(ws, total_r, 21, f"=SUM(U4:U{total_r-1})", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -571,15 +601,15 @@ def build_wip(wb):
     ws.sheet_view.showGridLines = False
 
     ws.row_dimensions[1].height = 34
-    ws.merge_cells("A1:Q1")
+    ws.merge_cells("A1:S1")
     t = ws.cell(1, 1, "过程品仓计算 — 工序WIP设计库存量")
     t.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=13)
     t.fill = PatternFill("solid", fgColor=C_HEADER_BG)
     t.alignment = Alignment(horizontal="center", vertical="center")
 
-    note_text = ("公式：设计WIP = MAX(下游小时消耗×缓冲小时数, 批量×最大等待批次数) "
+    note_text = ("公式：设计WIP = MAX(下游小时消耗×缓冲小时数, 批量×最大等待批次数)÷(1-设备故障率)×(1+良率损失率) "
                  "+ 待检库存 + 尾批库存 + 不良品/返工/隔离库存")
-    ws.merge_cells("A2:Q2")
+    ws.merge_cells("A2:S2")
     note = ws.cell(2, 1, note_text)
     note.font = Font(name="微软雅黑", italic=True, color="444444", size=9)
     note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -597,7 +627,9 @@ def build_wip(wb):
         ("批量大小\n(件)",    12),
         ("最大等待\n批次数",  12),
         ("按批量计算\nWIP\n[自动]", 12),
-        ("设计基础WIP\n=MAX(...)\n[自动]", 14),
+        ("修正后基础WIP\n[自动]", 14),
+        ("设备故障率",        10),
+        ("工序良率\n损失率", 10),
         ("待检等待\n库存",    12),
         ("尾批库存",          12),
         ("不良/返工/\n隔离库存", 12),
@@ -624,7 +656,7 @@ def build_wip(wb):
     for proc_idx, (proc_name, buf_sku_col) in enumerate(zip(processes, buf_cols)):
         # Process section header
         ws.row_dimensions[r].height = 22
-        ws.merge_cells(f"A{r}:Q{r}")
+        ws.merge_cells(f"A{r}:S{r}")
         c = ws.cell(r, 1, f"【{proc_name}】")
         c.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=10)
         c.fill = PatternFill("solid", fgColor=C_TITLE_BG)
@@ -659,53 +691,59 @@ def build_wip(wb):
                     f"=IFERROR(IF(过程品仓计算!I{r}=\"\",0,过程品仓计算!I{r})"
                     f"*IF(过程品仓计算!J{r}=\"\",0,过程品仓计算!J{r}),0)",
                     NUM_FMT_DEC2)
-            # Base WIP = MAX(buffer, batch)
+            # Corrected base WIP = MAX(buffer, batch)/(1-fault)*(1+yield_loss)
             set_fml(ws, r, 12,
-                    f"=IFERROR(MAX(过程品仓计算!H{r},过程品仓计算!K{r}),0)",
+                    f"=IFERROR(MAX(过程品仓计算!H{r},过程品仓计算!K{r})"
+                    f"/MAX(1-IF(过程品仓计算!M{r}=\"\",0,过程品仓计算!M{r}),0.1)"
+                    f"*(1+IF(过程品仓计算!N{r}=\"\",0,过程品仓计算!N{r})),0)",
                     NUM_FMT_DEC2)
 
+            is_graphite_stage = MANUFACTURING_PROCESS_STAGES[proc_idx] == "石墨化"
+            set_inp(ws, r, 13, 0.08 if is_graphite_stage else 0, NUM_FMT_DEC2)
+            set_inp(ws, r, 14, 0.08 if is_graphite_stage else 0, NUM_FMT_DEC2)
+
             # User inputs: inspection, tail batch, defect/rework
-            set_inp(ws, r, 13, None, NUM_FMT_INT)
-            set_inp(ws, r, 14, None, NUM_FMT_INT)
             set_inp(ws, r, 15, None, NUM_FMT_INT)
+            set_inp(ws, r, 16, None, NUM_FMT_INT)
+            set_inp(ws, r, 17, None, NUM_FMT_INT)
 
             # Total design WIP
-            set_fml(ws, r, 16,
+            set_fml(ws, r, 18,
                     f"=IFERROR(过程品仓计算!L{r}"
-                    f"+IF(过程品仓计算!M{r}=\"\",0,过程品仓计算!M{r})"
-                    f"+IF(过程品仓计算!N{r}=\"\",0,过程品仓计算!N{r})"
-                    f"+IF(过程品仓计算!O{r}=\"\",0,过程品仓计算!O{r}),0)",
+                    f"+IF(过程品仓计算!O{r}=\"\",0,过程品仓计算!O{r})"
+                    f"+IF(过程品仓计算!P{r}=\"\",0,过程品仓计算!P{r})"
+                    f"+IF(过程品仓计算!Q{r}=\"\",0,过程品仓计算!Q{r}),0)",
                     NUM_FMT_DEC2)
 
             # Estimated area – use成品 pallet qty for WIP (col13 in SKU sheet = M)
             # pallet qty for WIP: assume same as finished goods pallet qty (col13 SKU)
             # area = CEILING(WIP/pallet_qty, 1) × pallet_area / stack / utilization × expansion
-            area_fml = (f"=IFERROR(CEILING(过程品仓计算!P{r}/"
+            area_fml = (f"=IFERROR(CEILING(过程品仓计算!R{r}/"
                         f"MAX(产品SKU!M{sku_row},1),1)"
                         f"*参数设置!$C$13"
                         f"/MAX(参数设置!$C$14,1)"
                         f"/参数设置!$C$18"
                         f"*参数设置!$C$21,0)")
-            set_fml(ws, r, 17, area_fml, NUM_FMT_DEC2)
+            set_fml(ws, r, 19, area_fml, NUM_FMT_DEC2)
 
             r += 1
 
         # Sub-total for this process
         sub_start = r - NUM_SKU_ROWS
         ws.row_dimensions[r].height = 20
-        ws.merge_cells(f"A{r}:O{r}")
-        merge_hdr(ws, r, 1, 15, f"{proc_name} 小计", "305496")
-        set_fml(ws, r, 16, f"=SUM(P{sub_start}:P{r-1})", NUM_FMT_DEC2)
-        set_fml(ws, r, 17, f"=SUM(Q{sub_start}:Q{r-1})", NUM_FMT_DEC2)
+        ws.merge_cells(f"A{r}:Q{r}")
+        merge_hdr(ws, r, 1, 17, f"{proc_name} 小计", "305496")
+        set_fml(ws, r, 18, f"=SUM(R{sub_start}:R{r-1})", NUM_FMT_DEC2)
+        set_fml(ws, r, 19, f"=SUM(S{sub_start}:S{r-1})", NUM_FMT_DEC2)
         r += 1
 
     # Grand total: sum only the subtotal rows (every NUM_SKU_ROWS+2 rows, at offset NUM_SKU_ROWS+1)
     ws.row_dimensions[r].height = 22
-    ws.merge_cells(f"A{r}:O{r}")
-    merge_hdr(ws, r, 1, 15, "过程品仓 合计", C_TITLE_BG)
+    ws.merge_cells(f"A{r}:Q{r}")
+    merge_hdr(ws, r, 1, 17, "过程品仓 合计", C_TITLE_BG)
     # SUMPRODUCT + MOD 仅选择每个工序分块中的“小计行”（每块长度 NUM_SKU_ROWS+2，小计位于偏移 NUM_SKU_ROWS+1）
-    set_fml(ws, r, 16, f"=SUMPRODUCT((MOD(ROW(P4:P{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*P4:P{r-1})", NUM_FMT_DEC2)
-    set_fml(ws, r, 17, f"=SUMPRODUCT((MOD(ROW(Q4:Q{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*Q4:Q{r-1})", NUM_FMT_DEC2)
+    set_fml(ws, r, 18, f"=SUMPRODUCT((MOD(ROW(R4:R{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*R4:R{r-1})", NUM_FMT_DEC2)
+    set_fml(ws, r, 19, f"=SUMPRODUCT((MOD(ROW(S4:S{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*S4:S{r-1})", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -716,15 +754,15 @@ def build_fg(wb):
     ws.sheet_view.showGridLines = False
 
     ws.row_dimensions[1].height = 34
-    ws.merge_cells("A1:O1")
+    ws.merge_cells("A1:Q1")
     t = ws.cell(1, 1, "成品仓计算 — 设计库存量")
     t.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=13)
     t.fill = PatternFill("solid", fgColor=C_HEADER_BG)
     t.alignment = Alignment(horizontal="center", vertical="center")
 
     note_text = ("公式：设计库存 = MAX(日需求×生产间隔, 日需求×目标库存天数, 最小生产批量) "
-                 "+ 安全库存(日需求×安全天数) + 待检放行库存")
-    ws.merge_cells("A2:O2")
+                 "+ 安全库存(日需求×安全天数) + 返工补偿库存 + 待检放行库存")
+    ws.merge_cells("A2:Q2")
     note = ws.cell(2, 1, note_text)
     note.font = Font(name="微软雅黑", italic=True, color="444444", size=9)
     note.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
@@ -743,6 +781,8 @@ def build_fg(wb):
         ("按目标天数\n计算库存\n[自动]", 14),
         ("设计基础\n库存\n=MAX(...)\n[自动]", 14),
         ("安全库存\n[自动]", 12),
+        ("返工率",          10),
+        ("返工补偿\n库存\n[自动]", 12),
         ("待检放行\n库存",   12),
         ("设计库存\n合计\n[自动]", 14),
         ("估算占地\n面积(m²)\n[自动]", 14),
@@ -784,29 +824,34 @@ def build_fg(wb):
         set_fml(ws, r, 12,
                 f"=IFERROR(成品仓计算!E{r}*产品SKU!K{sku_row}*参数设置!$C$9,0)",
                 NUM_FMT_DEC2)
+        # Rework rate
+        set_fml(ws, r, 13, "=参数设置!$C$30", NUM_FMT_DEC2)
+        # Rework compensation stock
+        set_fml(ws, r, 14, f"=IFERROR(成品仓计算!K{r}*成品仓计算!M{r},0)", NUM_FMT_DEC2)
         # Inspection pending (user input)
-        set_inp(ws, r, 13, None, NUM_FMT_INT)
+        set_inp(ws, r, 15, None, NUM_FMT_INT)
         # Total design stock
-        set_fml(ws, r, 14,
+        set_fml(ws, r, 16,
                 f"=IFERROR(成品仓计算!K{r}+成品仓计算!L{r}"
-                f"+IF(成品仓计算!M{r}=\"\",0,成品仓计算!M{r}),0)",
+                f"+成品仓计算!N{r}"
+                f"+IF(成品仓计算!O{r}=\"\",0,成品仓计算!O{r}),0)",
                 NUM_FMT_DEC2)
         # Area
-        area_fml = (f"=IFERROR(CEILING(成品仓计算!N{r}/"
+        area_fml = (f"=IFERROR(CEILING(成品仓计算!P{r}/"
                     f"MAX(产品SKU!M{sku_row},1),1)"
                     f"*参数设置!$C$13"
                     f"/MAX(参数设置!$C$14,1)"
                     f"/参数设置!$C$19"
                     f"*参数设置!$C$21,0)")
-        set_fml(ws, r, 15, area_fml, NUM_FMT_DEC2)
+        set_fml(ws, r, 17, area_fml, NUM_FMT_DEC2)
 
     # Total row
     total_r = 4 + NUM_SKU_ROWS
     ws.row_dimensions[total_r].height = 22
     ws.merge_cells(f"A{total_r}:D{total_r}")
     merge_hdr(ws, total_r, 1, 4, "合计", C_TITLE_BG)
-    set_fml(ws, total_r, 14, f"=SUM(N4:N{total_r-1})", NUM_FMT_DEC2)
-    set_fml(ws, total_r, 15, f"=SUM(O4:O{total_r-1})", NUM_FMT_DEC2)
+    set_fml(ws, total_r, 16, f"=SUM(P4:P{total_r-1})", NUM_FMT_DEC2)
+    set_fml(ws, total_r, 17, f"=SUM(Q4:Q{total_r-1})", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -817,7 +862,7 @@ def build_summary(wb):
     ws.sheet_view.showGridLines = False
 
     ws.row_dimensions[1].height = 34
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:J1")
     t = ws.cell(1, 1, "汇总 — 各仓库设计库存量与估算面积")
     t.font = Font(name="微软雅黑", bold=True, color=C_HEADER_FG, size=13)
     t.fill = PatternFill("solid", fgColor=C_HEADER_BG)
@@ -831,7 +876,9 @@ def build_summary(wb):
         ("设计托盘数\n(合计)", 14),
         ("估算占地\n面积(m²)", 14),
         ("含扩展余量\n面积(m²)\n[自动]", 14),
-        ("备注", 28),
+        ("估算库存\n单价(元)", 14),
+        ("库存占用\n金额(元)\n[自动]", 14),
+        ("备注", 24),
     ]
     col = 1
     for hdr, w in headers:
@@ -850,8 +897,8 @@ def build_summary(wb):
 
     rows = [
         ("原料仓",     "MAX(日消耗×采购提前期, MOQ)×安全系数 + 安全库存 + 下批备料 + 退料 + 待检",
-         f"=原料仓计算!M{rm_total_row}", "（各原料单位不同）",
-         f"=原料仓计算!O{rm_total_row}", f"=原料仓计算!P{rm_total_row}"),
+         f"=原料仓计算!R{rm_total_row}", "（各原料单位不同）",
+         f"=原料仓计算!T{rm_total_row}", f"=原料仓计算!U{rm_total_row}"),
     ]
     for stage in MANUFACTURING_PROCESS_STAGES:
         rows.append((
@@ -863,12 +910,12 @@ def build_summary(wb):
             None,
         ))
     rows.extend([
-        ("过程品仓 合计", f"见过程品仓计算!P{wip_grand_row}",
-         f"=过程品仓计算!P{wip_grand_row}", "件",
-         None, f"=过程品仓计算!Q{wip_grand_row}"),
-        ("成品仓",     "MAX(日需求×生产间隔, 日需求×目标天数, 最小批量) + 安全库存 + 待检放行",
-         f"=成品仓计算!N{fg_total_row}", "件",
-         None, f"=成品仓计算!O{fg_total_row}"),
+        ("过程品仓 合计", f"见过程品仓计算!R{wip_grand_row}",
+         f"=过程品仓计算!R{wip_grand_row}", "件",
+         None, f"=过程品仓计算!S{wip_grand_row}"),
+        ("成品仓",     "MAX(日需求×生产间隔, 日需求×目标天数, 最小批量) + 安全库存 + 返工补偿 + 待检放行",
+         f"=成品仓计算!P{fg_total_row}", "件",
+         None, f"=成品仓计算!Q{fg_total_row}"),
     ])
 
     # Find WIP per-process subtotal rows
@@ -881,11 +928,11 @@ def build_summary(wb):
     for proc_idx, stage in enumerate(MANUFACTURING_PROCESS_STAGES):
         rows[1 + proc_idx] = (
             f"过程品仓\n（{stage}后）",
-            "MAX(下游小时消耗×缓冲小时数, 批量×等待批次) + 待检 + 尾批 + 不良品",
-            f"=过程品仓计算!P{proc_subtotal_rows[proc_idx]}",
+            "MAX(下游小时消耗×缓冲小时数, 批量×等待批次)÷(1-故障率)×(1+良率损失率) + 待检 + 尾批 + 不良品",
+            f"=过程品仓计算!R{proc_subtotal_rows[proc_idx]}",
             "件",
             None,
-            f"=过程品仓计算!Q{proc_subtotal_rows[proc_idx]}",
+            f"=过程品仓计算!S{proc_subtotal_rows[proc_idx]}",
         )
 
     for i, (wh, basis, qty_fml, unit, pallet_fml, area_fml) in enumerate(rows):
@@ -913,7 +960,9 @@ def build_summary(wb):
         set_fml(ws, r, 7,
                 f"=IFERROR(汇总!F{r}*参数设置!$C$21,0)",
                 NUM_FMT_DEC2)
-        set_txt(ws, r, 8, "")
+        set_inp(ws, r, 8, None, NUM_FMT_DEC2)
+        set_fml(ws, r, 9, f"=IFERROR(汇总!C{r}*汇总!H{r},0)", NUM_FMT_DEC2)
+        set_txt(ws, r, 10, "")
 
     # Grand total
     total_r = 3 + len(rows)
@@ -926,10 +975,13 @@ def build_summary(wb):
     set_fml(ws, total_r, 7,
             f"=IFERROR(汇总!G{raw_r}+汇总!G{wip_total_r}+汇总!G{fg_r},0)",
             NUM_FMT_DEC2)
+    set_fml(ws, total_r, 9,
+            f"=IFERROR(汇总!I{raw_r}+汇总!I{wip_total_r}+汇总!I{fg_r},0)",
+            NUM_FMT_DEC2)
 
     # Auxiliary area note
     aux_r = total_r + 2
-    ws.merge_cells(f"A{aux_r}:H{aux_r}")
+    ws.merge_cells(f"A{aux_r}:J{aux_r}")
     c = ws.cell(aux_r, 1,
                 "⚠ 上述面积为存储区估算，实际仓库还需加上：收发货区、质检区、不良品隔离区、"
                 "退换货区、包装区、通道等辅助区域，通常再增加30%~50%的辅助面积。")
@@ -939,7 +991,7 @@ def build_summary(wb):
 
     # Parameter reference reminder
     ref_r = aux_r + 2
-    ws.merge_cells(f"A{ref_r}:H{ref_r}")
+    ws.merge_cells(f"A{ref_r}:J{ref_r}")
     c = ws.cell(ref_r, 1, "★ 面积估算关键参数(可在[参数设置]工作表中修改)：")
     c.font = Font(name="微软雅黑", bold=True, size=10)
     c.alignment = Alignment(horizontal="left", vertical="center")
@@ -959,7 +1011,9 @@ def build_summary(wb):
     col_w(ws, 5, 14)
     col_w(ws, 6, 14)
     col_w(ws, 7, 16)
-    col_w(ws, 8, 28)
+    col_w(ws, 8, 14)
+    col_w(ws, 9, 16)
+    col_w(ws, 10, 24)
 
     for pr_row, label, fml in param_refs:
         ws.row_dimensions[pr_row].height = 18
