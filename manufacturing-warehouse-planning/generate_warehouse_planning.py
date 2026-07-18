@@ -28,9 +28,7 @@ C_HEADER_BG  = "1F4E79"   # dark blue  – section headers
 C_HEADER_FG  = "FFFFFF"   # white
 C_INPUT_BG   = "DEEAF1"   # light blue – user-input cells
 C_CALC_BG    = "E2EFDA"   # light green – formula / calculated cells
-C_WARN_BG    = "FFF2CC"   # light yellow – key assumptions
 C_TITLE_BG   = "2E75B6"   # medium blue – sheet title row
-C_ALT_BG     = "F2F2F2"   # light grey – alternate rows
 C_BORDER     = "8EA9C1"
 
 THIN = Side(border_style="thin", color=C_BORDER)
@@ -39,6 +37,16 @@ THIN_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 NUM_FMT_INT   = '#,##0'
 NUM_FMT_DEC2  = '#,##0.00'
 NUM_FMT_PCT   = '0.0%'
+
+NUM_SKU_ROWS = 12   # data rows for SKUs (supports up to 12 products)
+NUM_RM_ROWS  = 15   # data rows for raw materials
+DEFAULT_BASE_LEAD_DAYS = 15
+DEFAULT_RM_WITH_PRESET_LEAD = 8
+MANUFACTURING_PROCESS_STAGES = ["粗破", "烘干", "磨粉", "低温碳化", "石墨化", "高温碳化", "成品筛分"]
+NUM_PROCESSES = len(MANUFACTURING_PROCESS_STAGES)
+GRAPHITIZATION_STAGE_INDEX = MANUFACTURING_PROCESS_STAGES.index("石墨化")
+PROCESS_BLOCK_ROWS = NUM_SKU_ROWS + 2
+MIN_FAULT_DENOMINATOR = 0.01
 
 
 def hfont(bold=True, color=C_HEADER_FG, sz=10):
@@ -55,9 +63,6 @@ def ifill():
 
 def cfill():
     return PatternFill("solid", fgColor=C_CALC_BG)
-
-def wfill():
-    return PatternFill("solid", fgColor=C_WARN_BG)
 
 def center():
     return Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -148,7 +153,7 @@ def build_readme(wb):
         ("【填写说明】", [
             ("蓝色单元格",   "用户需要手动输入的参数（深蓝色字体、浅蓝色底色）。"),
             ("绿色单元格",   "由公式自动计算，请勿手动修改（黑色字体、浅绿色底色）。"),
-            ("黄色单元格",   "关键假设，需要特别关注和确认。"),
+            ("黄色单元格",   "当前模板未启用黄色专用输入样式，关键假设请优先检查参数设置中“需求与供应波动修正”分组。"),
             ("行数扩展",     "各计算表预留了足够行数（最多20行），需要更多行时可复制最后一行的公式向下填充。"),
         ]),
         ("【计算逻辑说明】", [
@@ -160,6 +165,7 @@ def build_readme(wb):
         ("【注意事项】", [
             ("多SKU换产",    "换产时会产生剩余退料（原料未用完退回），退料库存已在原料仓计算中单独考虑。"),
             ("良率损耗",     f"BOM 表中请填写单位成品实际原料消耗量（已包含{stage_chain}全流程良率损耗影响）。"),
+            ("需求修正系数叠加", "Q3/Q4峰值、订单变更冗余、新品爬坡系数会乘法叠加，请结合历史波动谨慎设值，避免过度放大。"),
             ("动态安全库存", "当前模板暂按固定安全库存计算（未启用动态算法）；后续有数据后可在参数设置中启用。"),
             ("分层管理",     "当前模板未启用ABC/XYZ分层管理，建议后续有分层规则后再接入差异化安全库存。"),
             ("安全系数",     "参数设置中的安全系数会乘以基础库存量，建议原料仓1.1~1.3，过程品仓1.1~1.2，成品仓1.1~1.2。"),
@@ -236,7 +242,7 @@ def build_params(wb):
         ("面积扩展余量系数",   1.2,   "—",      "最终面积乘以该系数，预留10%~30%余量"),
 
         ("【需求与供应波动修正】", None, None, None),
-        ("Q3/Q4需求峰值系数",      1.2,   "—",      "旺季需求放大系数，建议1.10~1.30"),
+        ("Q3/Q4需求峰值系数",      1.2,   "—",      "旺季需求放大系数，建议1.10~1.30（如仅部分SKU受影响，请在SKU层按需调整）"),
         ("订单变更/取消冗余系数",  1.03,  "—",      "可参考历史呆滞库存占比估算，建议1.00~1.10"),
         ("原料交期波动系数",       1.1,   "—",      "用于放大基础采购提前期，覆盖供应商波动"),
         ("春节停运附加天数",       18,    "天",     "节假日停运可按15~21天预估"),
@@ -276,11 +282,6 @@ def build_params(wb):
     ws.cell(row + 1, 2, "★ 其他工作表通过[参数设置!C行号]引用本表数值，请勿删除或移动行。").font = Font(
         name="微软雅黑", color="FF0000", italic=True, size=9)
 
-
-NUM_SKU_ROWS = 12   # data rows for SKUs (supports up to 12 products)
-NUM_RM_ROWS  = 15   # data rows for raw materials
-MANUFACTURING_PROCESS_STAGES = ["粗破", "烘干", "磨粉", "低温碳化", "石墨化", "高温碳化", "成品筛分"]
-NUM_PROCESSES = len(MANUFACTURING_PROCESS_STAGES)
 
 # 参数设置 row reference map (row 1=title, row 2=header, data starts row 3):
 #   C4=年工作天数, C5=每天工作小时数, C6=年工作小时数,
@@ -354,10 +355,10 @@ def build_sku(wb):
         set_inp(ws, r, 3, name)
         set_inp(ws, r, 4, unit)
         set_inp(ws, r, 5, annual, NUM_FMT_INT)
-        # monthly = annual / 12
-        set_fml(ws, r, 6, f"=IFERROR(产品SKU!E{r}/12,\"\")", NUM_FMT_DEC2)
-        # daily = annual / working days
-        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
+        # monthly = (annual / 12) × Q3/Q4 peak factor × order-change redundancy × ramp-up factor
+        set_fml(ws, r, 6, f"=IFERROR((产品SKU!E{r}/12)*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
+        # daily = (annual / working days) × Q3/Q4 peak factor × order-change redundancy × ramp-up factor
+        set_fml(ws, r, 7, f"=IFERROR((产品SKU!E{r}/参数设置!$C$4)*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
         set_inp(ws, r, 8, minbatch, NUM_FMT_INT)
         set_inp(ws, r, 9, interval, NUM_FMT_INT)
         set_inp(ws, r, 10, tgt_days, NUM_FMT_INT)
@@ -376,9 +377,9 @@ def build_sku(wb):
         ws.cell(r, 1, i + 1)
         for col in range(2, 16 + NUM_PROCESSES):
             set_inp(ws, r, col)
-        # daily formula
-        set_fml(ws, r, 6, f"=IFERROR(产品SKU!E{r}/12,\"\")", NUM_FMT_DEC2)
-        set_fml(ws, r, 7, f"=IFERROR(产品SKU!E{r}/参数设置!$C$4*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
+        # daily = (annual / working days) × Q3/Q4 peak factor × order-change redundancy × ramp-up factor
+        set_fml(ws, r, 6, f"=IFERROR((产品SKU!E{r}/12)*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
+        set_fml(ws, r, 7, f"=IFERROR((产品SKU!E{r}/参数设置!$C$4)*参数设置!$C$24*参数设置!$C$25*参数设置!$C$31,\"\")", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -542,10 +543,11 @@ def build_rawmat(wb):
         set_fml(ws, r, 5, daily_fml, NUM_FMT_DEC2)
 
         # User inputs
-        set_inp(ws, r, 6, 15 if i < 8 else None, NUM_FMT_INT)     # base lead time
+        set_inp(ws, r, 6, DEFAULT_BASE_LEAD_DAYS if i < DEFAULT_RM_WITH_PRESET_LEAD else None, NUM_FMT_INT)  # base lead time
         set_fml(ws, r, 7, "=参数设置!$C$27", NUM_FMT_INT)          # spring festival holiday days
         set_fml(ws, r, 8, "=参数设置!$C$26", NUM_FMT_DEC2)         # lead-time variation factor
-        set_fml(ws, r, 9, f"=IFERROR((原料仓计算!F{r}+原料仓计算!G{r})*原料仓计算!H{r},0)", NUM_FMT_DEC2)
+        # Effective lead time = (base lead time × supplier lead-time variation factor) + spring-festival shutdown days
+        set_fml(ws, r, 9, f"=IFERROR((原料仓计算!F{r}*原料仓计算!H{r})+原料仓计算!G{r},0)", NUM_FMT_DEC2)
         set_inp(ws, r, 10, None, NUM_FMT_INT)                     # MOQ
         set_inp(ws, r, 11, None, NUM_FMT_INT)                     # MPQ
         set_fml(ws, r, 12, "=参数设置!$C$7", NUM_FMT_DEC2)        # safety factor
@@ -694,13 +696,18 @@ def build_wip(wb):
             # Corrected base WIP = MAX(buffer, batch)/(1-fault)*(1+yield_loss)
             set_fml(ws, r, 12,
                     f"=IFERROR(MAX(过程品仓计算!H{r},过程品仓计算!K{r})"
-                    f"/MAX(1-IF(过程品仓计算!M{r}=\"\",0,过程品仓计算!M{r}),0.1)"
+                    f"/MAX(1-IF(过程品仓计算!M{r}=\"\",0,过程品仓计算!M{r}),{MIN_FAULT_DENOMINATOR})"
                     f"*(1+IF(过程品仓计算!N{r}=\"\",0,过程品仓计算!N{r})),0)",
                     NUM_FMT_DEC2)
 
-            is_graphite_stage = MANUFACTURING_PROCESS_STAGES[proc_idx] == "石墨化"
-            set_inp(ws, r, 13, 0.08 if is_graphite_stage else 0, NUM_FMT_DEC2)
-            set_inp(ws, r, 14, 0.08 if is_graphite_stage else 0, NUM_FMT_DEC2)
+            is_graphite_stage = proc_idx == GRAPHITIZATION_STAGE_INDEX
+            if is_graphite_stage:
+                set_fml(ws, r, 13, "=参数设置!$C$28", NUM_FMT_DEC2)
+                set_fml(ws, r, 14, "=参数设置!$C$29", NUM_FMT_DEC2)
+            else:
+                # Non-graphitization stages default to 0 and remain editable for manual overrides.
+                set_inp(ws, r, 13, 0, NUM_FMT_DEC2)
+                set_inp(ws, r, 14, 0, NUM_FMT_DEC2)
 
             # User inputs: inspection, tail batch, defect/rework
             set_inp(ws, r, 15, None, NUM_FMT_INT)
@@ -737,13 +744,15 @@ def build_wip(wb):
         set_fml(ws, r, 19, f"=SUM(S{sub_start}:S{r-1})", NUM_FMT_DEC2)
         r += 1
 
-    # Grand total: sum only the subtotal rows (every NUM_SKU_ROWS+2 rows, at offset NUM_SKU_ROWS+1)
+    # Grand total: sum only the subtotal rows (every PROCESS_BLOCK_ROWS rows, at offset NUM_SKU_ROWS+1)
     ws.row_dimensions[r].height = 22
     ws.merge_cells(f"A{r}:Q{r}")
     merge_hdr(ws, r, 1, 17, "过程品仓 合计", C_TITLE_BG)
-    # SUMPRODUCT + MOD 仅选择每个工序分块中的“小计行”（每块长度 NUM_SKU_ROWS+2，小计位于偏移 NUM_SKU_ROWS+1）
-    set_fml(ws, r, 18, f"=SUMPRODUCT((MOD(ROW(R4:R{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*R4:R{r-1})", NUM_FMT_DEC2)
-    set_fml(ws, r, 19, f"=SUMPRODUCT((MOD(ROW(S4:S{r-1})-4,{NUM_SKU_ROWS+2})=({NUM_SKU_ROWS+1}))*S4:S{r-1})", NUM_FMT_DEC2)
+    # SUMPRODUCT + MOD 仅选择每个工序分块中的“小计行”：
+    # 每个工序块长度为 PROCESS_BLOCK_ROWS（1行分组标题 + NUM_SKU_ROWS行数据 + 1行小计），
+    # 小计行相对块起点偏移 NUM_SKU_ROWS+1，因此通过 MOD 条件筛出所有小计行求和。
+    set_fml(ws, r, 18, f"=SUMPRODUCT((MOD(ROW(R4:R{r-1})-4,{PROCESS_BLOCK_ROWS})=({NUM_SKU_ROWS+1}))*R4:R{r-1})", NUM_FMT_DEC2)
+    set_fml(ws, r, 19, f"=SUMPRODUCT((MOD(ROW(S4:S{r-1})-4,{PROCESS_BLOCK_ROWS})=({NUM_SKU_ROWS+1}))*S4:S{r-1})", NUM_FMT_DEC2)
 
 
 # ===========================================================================
@@ -890,9 +899,9 @@ def build_summary(wb):
     # Raw material warehouse total row reference
     rm_total_row = 4 + NUM_RM_ROWS
     # WIP grand total row calculation
-    # each process uses (1 section header + NUM_SKU_ROWS data rows + 1 subtotal) = NUM_SKU_ROWS+2
-    # grand total is at row = 4 + NUM_PROCESSES*(NUM_SKU_ROWS+2)
-    wip_grand_row = 4 + NUM_PROCESSES * (NUM_SKU_ROWS + 2)
+    # each process uses (1 section header + NUM_SKU_ROWS data rows + 1 subtotal) = PROCESS_BLOCK_ROWS
+    # grand total is at row = 4 + NUM_PROCESSES*PROCESS_BLOCK_ROWS
+    wip_grand_row = 4 + NUM_PROCESSES * PROCESS_BLOCK_ROWS
     fg_total_row  = 4 + NUM_SKU_ROWS
 
     rows = [
@@ -921,8 +930,8 @@ def build_summary(wb):
     # Find WIP per-process subtotal rows
     proc_subtotal_rows = []
     for proc_idx in range(NUM_PROCESSES):
-        # section header at: 4 + proc_idx*(NUM_SKU_ROWS+2), data rows follow, subtotal at +NUM_SKU_ROWS+1
-        subtotal_r = 4 + proc_idx * (NUM_SKU_ROWS + 2) + NUM_SKU_ROWS + 1
+        # section header at: 4 + proc_idx*PROCESS_BLOCK_ROWS, data rows follow, subtotal at +NUM_SKU_ROWS+1
+        subtotal_r = 4 + proc_idx * PROCESS_BLOCK_ROWS + NUM_SKU_ROWS + 1
         proc_subtotal_rows.append(subtotal_r)
 
     for proc_idx, stage in enumerate(MANUFACTURING_PROCESS_STAGES):
